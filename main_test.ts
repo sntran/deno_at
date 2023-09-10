@@ -1,5 +1,5 @@
-import { assertEquals, assertNotEquals } from "https://deno.land/std@0.201.0/assert/mod.ts";
-import { at } from "./main.ts";
+import { assert, assertEquals, assertNotEquals } from "https://deno.land/std@0.201.0/assert/mod.ts";
+import { at, atq } from "./main.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,7 +25,7 @@ Deno.test("at", async (t) => {
 
     let request: string|URL|Request, jobId: number | null;
 
-    request = `http://${hostname}:${port}`;
+    request = `http://${hostname}:${port}/`;
     jobId = await at(request, time);
     assertEquals(jobId, 0, "should return the first job id with string request");
 
@@ -51,7 +51,7 @@ Deno.test("at", async (t) => {
     const now = new Date();
     const time = new Date(now.getTime() + 10);
 
-    const request = new Request(`http://${hostname}:${port}`);
+    const request = new Request(`http://${hostname}:${port}/`);
     await at(request, time.toISOString());
 
     assertEquals(
@@ -65,5 +65,49 @@ Deno.test("at", async (t) => {
       lastRequestTimestamp, date,
       "should reflect the timestamp after job is executed"
     );
+  });
+});
+
+Deno.test("atq", async (t) => {
+  await t.step("should list all added jobs when no queue specified", async () => {
+    const now = new Date();
+    const time = new Date(now.getTime() + 10).toISOString();
+    const request = `http://${hostname}:${port}/`;
+
+    await at(request, time);
+
+    const jobs = await atq();
+    assert(jobs.find((job) => job.url === request), "should list the added job");
+  });
+
+  await t.step("should list added jobs in specified queue", async () => {
+    const now = new Date();
+    const time = new Date(now.getTime() + 10).toISOString();
+    const request = `http://${hostname}:${port}/`;
+
+    await at(request, time);
+
+    let jobs = await atq("a");
+    assert(jobs.find((job) => job.url === request), "should list the added job in default queue");
+
+    jobs = await atq("b");
+    assert(!jobs.find((job) => job.url === request), "should not list the added job in other queue");
+
+    await at(request, time, "b");
+    jobs = await atq("b");
+    assert(jobs.find((job) => job.url === request), "should list the added job in correct queue");
+  });
+
+  await t.step("should not list expired job", async () => {
+    const now = new Date();
+    const delay = 10;
+    const time = new Date(now.getTime() + delay).toISOString();
+    const request = `http://${hostname}:${port}/`;
+
+    await at(request, time);
+    await sleep(delay + 10); // wait for job to expire
+
+    const jobs = await atq();
+    assert(!jobs.find((job) => job.url === request), "should not list the expired job in default queue");
   });
 });
