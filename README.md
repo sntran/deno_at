@@ -6,16 +6,16 @@ queue.
 ## Usage
 
 ```typescript
-import { at, atd, atrm } from "./main.ts";
+import { at, atq, atrm } from "./main.ts";
 
 // Fetches "https://example.com" in 10 seconds
 const time = new Date(Date.now() + 10000).toISOString();
 const id = await at("https://example.com", time, "a");
 console.log(id); // 0
-const [job] = await atd();
+const [job] = await atq();
 console.log(job.id); // 0
 await atrm(job.id);
-const jobs = await atd("a");
+const jobs = await atq("a");
 console.log(jobs.length); // 0
 ```
 
