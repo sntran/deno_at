@@ -5,19 +5,18 @@
  */
 
 const PREFIX = "jobs";
-const QUEUES = [..."abcdefghijklmnopqrstuvwxyz"];
 
 const DATABASE_URL = Deno.env.get("DATABASE_URL");
 const db = await Deno.openKv(DATABASE_URL);
 
 db.listenQueue(async (job: unknown) => {
-  const { id, queue } = job as { id: number, queue: string };
-  const key = [PREFIX, queue, id];
+  const { id, queue } = job as { id: number; queue: string };
+  const key = [PREFIX, id, queue];
   const { value: request } = await db.get<Request>(key);
   if (!request) return;
 
   // Reconstructs the serialized request.
-  const { url, ...init} = request;
+  const { url, ...init } = request;
   // Executes the job and closes response body.
   fetch(url, init).then((response) => response.body?.cancel());
   // Removes the job from the database.
@@ -43,9 +42,15 @@ function parseTime(time: string): Date {
  * Note: Job number starts at 0.
  *
  * @param {string|URL|Request} request - The request to be executed
+ * @param {string} time - The time to execute the request
+ * @param {string} [queue="a"] - The queue to add the job to. Defaults to "a".
  * @returns {number} - The job number
  */
-export async function at(request: string|URL|Request, time: string, queue = "a"): Promise<number> {
+export async function at(
+  request: string | URL | Request,
+  time: string,
+  queue = "a",
+): Promise<number> {
   if (typeof request === "string") {
     request = new URL(request);
   }
@@ -68,7 +73,7 @@ export async function at(request: string|URL|Request, time: string, queue = "a")
     // Gets the current job id
     const idRes = await db.get<number>(idKey);
     id = Number(idRes.value);
-    const jobKey = [PREFIX, queue, id];
+    const jobKey = [PREFIX, id, queue];
 
     res = await db.atomic()
       .check(idRes) // Ensures the current job ID has not changed.
@@ -83,22 +88,19 @@ export async function at(request: string|URL|Request, time: string, queue = "a")
 }
 
 /**
- * Lists the user's pending jobs
+ * Lists pending jobs
  *
- * If the user is the superuser, everybody's jobs are listed.
+ * @param {string} [queue] - The queue to list jobs from. If not specified, all jobs will be listed.
  */
 export async function atq(queue?: string) {
   const prefix = [PREFIX];
-  if (queue) {
-    prefix.push(queue);
-  }
   const entries = await db.list<Request>({ prefix });
   const jobs = [];
 
   for await (const { key, value } of entries) {
-    const [, _, id] = key;
-    if (!id) continue;
-    jobs.push({ id, value});
+    const [, id, q] = key;
+    if (!q || (queue && q !== queue)) continue;
+    jobs.push({ id, value });
   }
 
   return jobs;
@@ -109,22 +111,14 @@ export async function atq(queue?: string) {
  */
 export async function atrm(...jobIds: number[]) {
   for await (const jobId of jobIds) {
+    const prefix = [PREFIX, jobId];
     let res = { ok: false };
-    // We don't know which queue the job is in, so we get from all queues.
-    const keys = QUEUES.map((queue) => [PREFIX, queue, jobId]);
 
-    transaction: while (!res.ok) {
-      // `.getMany` only allows 10 keys at a time.
-      const results = await Promise.all([
-        keys.slice(0, 10),
-        keys.slice(10, 20),
-        keys.slice(20)
-      ].map((subkeys) => {
-        return db.getMany<Request[]>(subkeys);
-      }));
-
-      // There should only be one queue that contains this job.
-      const [jobRes] = results.flat().filter((res) => res.value !== null);
+    transaction:
+    while (!res.ok) {
+      // There should only be one key that contains this job.
+      const { value: jobRes } = await db.list<Request>({ prefix }, { limit: 1 })
+        .next();
       if (!jobRes) break transaction;
 
       res = await db.atomic()
