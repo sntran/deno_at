@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertNotEquals } from "https://deno.land/std@0.201.0/assert/mod.ts";
-import { at, atq } from "./main.ts";
+import { at, atq, atrm } from "./main.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,10 +74,10 @@ Deno.test("atq", async (t) => {
     const time = new Date(now.getTime() + 10).toISOString();
     const request = `http://${hostname}:${port}/`;
 
-    await at(request, time);
+    const jobId = await at(request, time);
 
     const jobs = await atq();
-    assert(jobs.find((job) => job.url === request), "should list the added job");
+    assert(jobs.find((job) => job.id === jobId), "should list the added job");
   });
 
   await t.step("should list added jobs in specified queue", async () => {
@@ -85,17 +85,17 @@ Deno.test("atq", async (t) => {
     const time = new Date(now.getTime() + 10).toISOString();
     const request = `http://${hostname}:${port}/`;
 
-    await at(request, time);
+    let jobId = await at(request, time);
 
     let jobs = await atq("a");
-    assert(jobs.find((job) => job.url === request), "should list the added job in default queue");
+    assert(jobs.find((job) => job.id === jobId), "should list the added job in default queue");
 
     jobs = await atq("b");
-    assert(!jobs.find((job) => job.url === request), "should not list the added job in other queue");
+    assert(!jobs.find((job) => job.id === jobId), "should not list the added job in other queue");
 
-    await at(request, time, "b");
+    jobId = await at(request, time, "b");
     jobs = await atq("b");
-    assert(jobs.find((job) => job.url === request), "should list the added job in correct queue");
+    assert(jobs.find((job) => job.id === jobId), "should list the added job in correct queue");
   });
 
   await t.step("should not list expired job", async () => {
@@ -104,10 +104,41 @@ Deno.test("atq", async (t) => {
     const time = new Date(now.getTime() + delay).toISOString();
     const request = `http://${hostname}:${port}/`;
 
-    await at(request, time);
+    const jobId = await at(request, time);
     await sleep(delay + 10); // wait for job to expire
 
     const jobs = await atq();
-    assert(!jobs.find((job) => job.url === request), "should not list the expired job in default queue");
+    assert(!jobs.find((job) => job.id === jobId), "should not list the expired job in default queue");
+  });
+});
+
+Deno.test("atrm", async (t) => {
+  await t.step("should delete jobs", async () => {
+    const now = new Date();
+    const time = new Date(now.getTime() + 10).toISOString();
+    const request = `http://${hostname}:${port}/`;
+
+    const jobId = await at(request, time);
+    await atrm(jobId);
+
+    const jobs = await atq();
+    assert(!jobs.find((job) => job.id === jobId), "should not list the deleted job");
+  });
+
+  await t.step("should not execute deleted jobs", async () => {
+    const now = new Date();
+    const delay = 10;
+    const time = new Date(now.getTime() + delay).toISOString();
+    const request = `http://${hostname}:${port}/`;
+
+    const date = lastRequestTimestamp;
+    const jobId = await at(request, time);
+    await atrm(jobId);
+
+    await sleep(delay + 10); // wait for job to expire
+    assertEquals(
+      lastRequestTimestamp, date,
+      "should not change last timestamp when deleted job is not executed"
+    );
   });
 });
