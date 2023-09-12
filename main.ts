@@ -1,11 +1,11 @@
+#!/usr/bin/env -S deno run --unstable --allow-net --allow-env
+
 /**
  * Schedules commands to be executed once, at a particular time in the future.
  *
  * The commands are executed at a later time, using `fetch`.
  */
-
 const PREFIX = "jobs";
-
 const DATABASE_URL = Deno.env.get("DATABASE_URL");
 const db = await Deno.openKv(DATABASE_URL);
 
@@ -78,7 +78,7 @@ export async function at(
     res = await db.atomic()
       .check(idRes) // Ensures the current job ID has not changed.
       .check({ key: jobKey, versionstamp: null }) // Ensures the job does not exist.
-      .set(jobKey, job, { expireIn }) // Stores the job by its number
+      .set(jobKey, job, { expireIn }) // Stores the job by its number and queue
       .enqueue({ id, queue }, { delay: expireIn }) // Adds the job to the queue for execution
       .sum(idKey, 1n) // Increments the job ID
       .commit();
@@ -95,12 +95,14 @@ export async function at(
 export async function atq(queue?: string) {
   const prefix = [PREFIX];
   const entries = await db.list<Request>({ prefix });
-  const jobs = [];
+  const jobs: Array<{ id: number; value: Request }> = [];
 
   for await (const { key, value } of entries) {
     const [, id, q] = key;
     if (!q || (queue && q !== queue)) continue;
-    jobs.push({ id, value });
+    const { url, ...init } = value;
+    const request = new Request(url, init);
+    jobs.push({ id: Number(id), value: request });
   }
 
   return jobs;
@@ -131,5 +133,86 @@ export async function atrm(...jobIds: number[]) {
 
 // Learn more at https://deno.land/manual/examples/module_metadata#concepts
 if (import.meta.main) {
+  const { parse } = await import("https://deno.land/std@0.201.0/flags/mod.ts");
 
+  const {
+    _: args,
+    cat,
+    list,
+    remove,
+    queue,
+    time,
+  } = parse(Deno.args, {
+    alias: {
+      cat: ["c"], // Cat the jobs listed on the command line to standard output.
+      list: ["l"], // With no arguments, list all jobs. If queue is specified, list only jobs in that queue.
+      queue: ["q"], // Use the specified queue
+      remove: ["d", "r"], // Remove jobs identified by their job number
+      time: ["t"], // Specify the job time using the POSIX time format
+    },
+    default: {
+      queue: "a",
+    },
+    boolean: [
+      "cat",
+      "list",
+      "remove",
+    ],
+    string: [
+      "queue",
+      "time",
+    ],
+  });
+
+  if (cat || list || remove) {
+    const jobIds = args.map((arg) => Number(arg));
+
+    if (cat) {
+      const jobs = await atq(queue)
+        .then((jobs) =>
+          jobs.filter((job) => !jobIds.length || jobIds.includes(job.id))
+        )
+        .then((jobs) => jobs.map((job) => job.value.headers.get("Date")));
+      console.table(jobs);
+    }
+
+    if (list) {
+      const jobs = await atq(queue)
+        .then((jobs) =>
+          jobs.filter((job) => !jobIds.length || jobIds.includes(job.id))
+        )
+        .then((jobs) =>
+          jobs.map((job) => ({
+            id: job.id,
+            time: job.value.headers.get("Date"),
+          }))
+        );
+      console.table(jobs);
+    }
+
+    if (remove) {
+      await atrm(...jobIds);
+    }
+
+    Deno.exit(0);
+  }
+
+  if (!time) {
+    console.error("at: missing time specification");
+    Deno.exit(1);
+  }
+
+  const decoder = new TextDecoder();
+  let input = "";
+  for await (const chunk of Deno.stdin.readable) {
+    input += decoder.decode(chunk);
+  }
+
+  if (!input) {
+    console.error("at: missing job specification");
+    Deno.exit(1);
+  }
+
+  await at(input, time, queue);
+  Deno.exit(0);
 }
