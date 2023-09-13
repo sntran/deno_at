@@ -12,17 +12,26 @@ const db = await Deno.openKv(DATABASE_URL);
 db.listenQueue(async (job: unknown) => {
   const { id, queue } = job as { id: number; queue: string };
   const key = [PREFIX, id, queue];
-  const { value: request } = await db.get<Request>(key);
-  if (!request) return;
+  const jobRes = await db.get<Request>(key);
+  const { value } = jobRes;
+  if (!value) {
+    // Job has been deleted or already executed.
+    return;
+  }
+
+  let res = { ok: false };
+  while (!res.ok) {
+    // Removes the job from the database.
+    res = await db.atomic()
+      .check(jobRes) // Ensures the job has not changed.
+      .delete(key)
+      .commit();
+  }
 
   // Reconstructs the serialized request.
-  const { url, ...init } = request;
+  const { url, ...init } = value;
   // Executes the job and closes response body.
   fetch(url, init).then((response) => response.body?.cancel());
-  // Removes the job from the database.
-  await db.atomic()
-    .delete(key)
-    .commit();
 });
 
 /**
