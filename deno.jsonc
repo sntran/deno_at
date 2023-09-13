@@ -1,6 +1,7 @@
 {
   "tasks": {
     "dev": "deno run --watch main.ts",
-    "test": "DATABASE_URL=:memory: deno test --unstable --watch --allow-all"
+    "test": "DATABASE_URL=:memory: deno test --unstable --watch --allow-all",
+    "bench": "DATABASE_URL=:memory: deno bench --unstable --allow-all"
   }
 }

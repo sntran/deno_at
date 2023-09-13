@@ -3,10 +3,28 @@
 An experimental port of `at` command in Deno using `Deno.Kv` as a storage and
 queue.
 
+## Why?
+
+Mostly, to try out `Deno.Kv` and its new queue API (`enqueue` and
+`listenQueue`).
+
+There is one advantage of using this 50+MB library over 100+KB `at` command is
+that it delegates the job execution to a remote service instead of running it
+locally. This means that we can run the job on a different machine, or even a
+different architecture.
+
+For example, one can have it executes a Deno Deploy instance, in which they can
+control the execution environment (e.g. memory limit, CPU limit, variables,
+etc.) and the job can be executed in a sandboxed environment.
+
+## Playground
+
+https://dash.deno.com/playground/atd
+
 ## Usage
 
 ```typescript
-import { at, atq, atrm } from "./main.ts";
+import { at, atq, atrm } from "https://raw.githubusercontent.com/sntran/deno_at/main/main.ts";
 
 // Fetches "https://example.com" in 10 seconds
 const time = new Date(Date.now() + 10000).toISOString();
@@ -27,7 +45,21 @@ $ deno run --unstable -A ./main.ts -l
 $ deno run --unstable -A ./main.ts -r 0
 ```
 
-## Notes
+## Development
+
+Install `deno` if you haven't already:
+
+```shell
+curl -fsSL https://deno.land/x/install/install.sh | sh
+```
+
+Clone the repo:
+
+```shell
+git clone https://github.com/sntran/deno_at.git
+```
+
+### Notes
 
 - `listenQueue` works well offline, so we can have the CLI that works without
   daemon.
